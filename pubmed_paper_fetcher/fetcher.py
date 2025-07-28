@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import date
 from typing import List, Optional, Dict, Any
 import requests
@@ -57,6 +58,9 @@ class PubMedFetcher:
             response = requests.get(self.SEARCH_URL, params=params, timeout=30)
             response.raise_for_status()
             
+            # Rate limiting: wait between requests
+            time.sleep(0.5)  # ~2 requests per second (more conservative)
+            
             data = response.json()
             id_list = data.get('esearchresult', {}).get('idlist', [])
             
@@ -95,6 +99,9 @@ class PubMedFetcher:
         try:
             summary_response = requests.get(self.SUMMARY_URL, params=summary_params, timeout=30)
             summary_response.raise_for_status()
+            
+            # Rate limiting: wait between requests
+            time.sleep(0.5)  # ~2 requests per second (more conservative)
             summary_data = summary_response.json()
             
             paper_data = summary_data.get('result', {}).get(pubmed_id, {})
@@ -115,6 +122,9 @@ class PubMedFetcher:
             
             fetch_response = requests.get(self.FETCH_URL, params=fetch_params, timeout=30)
             fetch_response.raise_for_status()
+            
+            # Rate limiting: wait between requests
+            time.sleep(0.5)  # ~2 requests per second (more conservative)
             
             # Parse XML to extract author information
             authors = self._parse_authors_from_xml(fetch_response.text)
@@ -210,30 +220,82 @@ class PubMedFetcher:
         # Extract author names and affiliations
         import re
         
-        # Find author sections
-        author_sections = re.findall(r'<Author>(.*?)</Author>', xml_content, re.DOTALL)
+        if self.debug:
+            self.logger.debug(f"Parsing XML content length: {len(xml_content)}")
+        
+        # Try different author patterns
+        author_patterns = [
+            r'<Author>(.*?)</Author>',
+            r'<AuthorList>(.*?)</AuthorList>',
+            r'<Author ValidYN="Y">(.*?)</Author>'
+        ]
+        
+        author_sections = []
+        for pattern in author_patterns:
+            author_sections = re.findall(pattern, xml_content, re.DOTALL)
+            if author_sections:
+                if self.debug:
+                    self.logger.debug(f"Found {len(author_sections)} authors with pattern: {pattern}")
+                break
+        
+        if not author_sections:
+            # Try to find authors in a different format
+            author_sections = re.findall(r'<Author ValidYN="Y">(.*?)</Author>', xml_content, re.DOTALL)
+            if not author_sections:
+                # Look for any author-like content
+                author_sections = re.findall(r'<Author[^>]*>(.*?)</Author>', xml_content, re.DOTALL)
+        
+        if self.debug:
+            self.logger.debug(f"Total author sections found: {len(author_sections)}")
         
         for section in author_sections:
-            # Extract author name
+            # Extract author name - try multiple patterns
+            author_name = ""
+            
+            # Try LastName + ForeName pattern
             name_match = re.search(r'<LastName>(.*?)</LastName>', section)
             last_name = name_match.group(1) if name_match else ""
             
             forename_match = re.search(r'<ForeName>(.*?)</ForeName>', section)
             fore_name = forename_match.group(1) if forename_match else ""
             
-            author_name = f"{fore_name} {last_name}".strip()
+            if last_name or fore_name:
+                author_name = f"{fore_name} {last_name}".strip()
             
-            # Extract affiliations
+            # If no name found, try alternative patterns
+            if not author_name:
+                # Try CollectiveName
+                collective_match = re.search(r'<CollectiveName>(.*?)</CollectiveName>', section)
+                if collective_match:
+                    author_name = collective_match.group(1).strip()
+            
+            if not author_name:
+                # Try to extract any text that looks like a name
+                name_text = re.sub(r'<[^>]+>', '', section).strip()
+                if name_text and len(name_text) < 100:  # Reasonable name length
+                    author_name = name_text
+            
+            # Extract affiliations - try multiple patterns
             affiliations = []
-            affiliation_sections = re.findall(r'<AffiliationInfo>(.*?)</AffiliationInfo>', section, re.DOTALL)
+            affiliation_patterns = [
+                r'<AffiliationInfo>(.*?)</AffiliationInfo>',
+                r'<Affiliation>(.*?)</Affiliation>',
+                r'<AffiliationInfo[^>]*>(.*?)</AffiliationInfo>'
+            ]
             
-            for aff_section in affiliation_sections:
-                aff_match = re.search(r'<Affiliation>(.*?)</Affiliation>', aff_section)
-                if aff_match:
-                    affiliation_text = clean_text(aff_match.group(1))
-                    if affiliation_text:
+            for aff_pattern in affiliation_patterns:
+                affiliation_sections = re.findall(aff_pattern, section, re.DOTALL)
+                for aff_section in affiliation_sections:
+                    # Clean the affiliation text
+                    affiliation_text = re.sub(r'<[^>]+>', '', aff_section).strip()
+                    affiliation_text = clean_text(affiliation_text)
+                    
+                    if affiliation_text and len(affiliation_text) > 3:  # Reasonable length
                         is_academic = is_academic_affiliation(affiliation_text)
                         company_name = extract_company_name(affiliation_text) if not is_academic else None
+                        
+                        if self.debug:
+                            self.logger.debug(f"Affiliation: '{affiliation_text}' -> Academic: {is_academic}, Company: {company_name}")
                         
                         affiliation = Affiliation(
                             name=affiliation_text,
@@ -243,8 +305,10 @@ class PubMedFetcher:
                         affiliations.append(affiliation)
             
             # Extract email if available
+            email = None
             email_match = re.search(r'<Email>(.*?)</Email>', section)
-            email = email_match.group(1) if email_match else None
+            if email_match:
+                email = email_match.group(1).strip()
             
             if author_name:
                 author = Author(
@@ -253,6 +317,9 @@ class PubMedFetcher:
                     affiliations=affiliations
                 )
                 authors.append(author)
+                
+                if self.debug:
+                    self.logger.debug(f"Added author: {author_name} with {len(affiliations)} affiliations")
         
         return authors
     

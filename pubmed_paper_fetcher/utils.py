@@ -26,8 +26,22 @@ def is_academic_affiliation(affiliation: str) -> bool:
         'medical center', 'hospital', 'clinic', 'research center',
         'laboratory', 'lab', 'department', 'faculty', 'professor',
         'associate professor', 'assistant professor', 'lecturer',
-        'researcher', 'scientist', 'phd', 'postdoc', 'postdoctoral'
+        'researcher', 'scientist', 'phd', 'postdoc', 'postdoctoral',
+        'school of', 'department of', 'center for', 'centre for'
     ]
+    
+    # Company/industry keywords that indicate non-academic
+    company_keywords = [
+        'consultants', 'consulting', 'corporation', 'corp', 'inc',
+        'ltd', 'limited', 'company', 'co', 'pharmaceuticals',
+        'pharma', 'biotech', 'biotechnology', 'therapeutics',
+        'vaccines', 'drugs', 'medicines', 'products'
+    ]
+    
+    # Check for company keywords first (these override academic keywords)
+    for keyword in company_keywords:
+        if keyword in affiliation_lower:
+            return False  # This is a company, not academic
     
     # Check for academic keywords
     for keyword in academic_keywords:
@@ -69,6 +83,42 @@ def extract_company_name(affiliation: str) -> Optional[str]:
     for prefix in prefixes:
         if affiliation_clean.startswith(prefix):
             affiliation_clean = affiliation_clean[len(prefix):].strip()
+    
+    # Remove author names (common pattern: "Name, Company")
+    if ',' in affiliation_clean:
+        parts = affiliation_clean.split(',')
+        # If we have multiple parts, take the first one as it's likely the company
+        if len(parts) > 1:
+            affiliation_clean = parts[0].strip()
+    
+    # Look for specific company patterns
+    company_patterns = [
+        r'([A-Z][a-z]+ Consultants?)',
+        r'([A-Z][a-z]+ Pharmaceuticals?)',
+        r'([A-Z][a-z]+ Inc\.?)',
+        r'([A-Z][a-z]+ Corp\.?)',
+        r'([A-Z][a-z]+ Limited?)',
+        r'([A-Z][a-z]+ Company)',
+        r'([A-Z][a-z]+ Therapeutics?)',
+        r'([A-Z][a-z]+ Biotech)',
+        r'([A-Z][a-z]+ Vaccines?)'
+    ]
+    
+    for pattern in company_patterns:
+        match = re.search(pattern, affiliation_clean)
+        if match:
+            return match.group(1)
+    
+    # If no specific pattern found, try to extract the first part before a comma
+    if ',' in affiliation_clean:
+        first_part = affiliation_clean.split(',')[0].strip()
+        # Check if it looks like a company name (not just a location)
+        if len(first_part) > 3 and not first_part.lower() in ['usa', 'australia', 'uk', 'canada']:
+            return first_part
+    
+    # If we still have a reasonable length affiliation, return it
+    if len(affiliation_clean) > 3 and len(affiliation_clean) < 50:
+        return affiliation_clean
     
     # Clean up extra whitespace and punctuation
     affiliation_clean = re.sub(r'\s+', ' ', affiliation_clean).strip()

@@ -13,7 +13,6 @@ from .exporter import CSVExporter
 @click.option('-f', '--file', 'output_file', help='Output file path for CSV results')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug mode')
 @click.option('-m', '--max-results', default=100, help='Maximum number of results to process')
-@click.option('-h', '--help', is_flag=True, help='Show this help message')
 def main(query: str, output_file: Optional[str], debug: bool, max_results: int) -> None:
     """
     Fetch research papers from PubMed with pharmaceutical/biotech company affiliations.

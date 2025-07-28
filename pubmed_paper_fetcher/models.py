@@ -46,7 +46,7 @@ class Paper:
     pubmed_id: str
     title: str
     publication_date: date
-    authors: List[Author]
+    authors: List[Author] = None
     corresponding_author_email: Optional[str] = None
     
     def __post_init__(self) -> None:

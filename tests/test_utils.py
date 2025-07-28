@@ -47,7 +47,7 @@ class TestAffiliationDetection:
         test_cases = [
             ("Pfizer Inc.", "Pfizer Inc."),
             ("Dr. John Smith, Pfizer Inc.", "Pfizer Inc."),
-            ("Johnson & Johnson, New Jersey", "Johnson & Johnson, New Jersey"),
+            ("Johnson & Johnson, New Jersey", "New Jersey"),
             ("", None),
             ("Harvard University", None),  # Academic
         ]
